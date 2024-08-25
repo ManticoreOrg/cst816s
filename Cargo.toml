@@ -20,8 +20,8 @@ keywords = [
 readme = "README.md"
 
 [dependencies]
-cortex-m = "0.6.2"
-embedded-hal = "0.2.3"
+#cortex-m = "0.6.2"
+embedded-hal = "1.0.0"
 
 [dev-dependencies]
 cortex-m-rt = "0.6.12"

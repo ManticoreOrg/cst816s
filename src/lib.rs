@@ -3,15 +3,13 @@
 use core::fmt::Debug;
 
 use embedded_hal as hal;
-use hal::blocking::delay::DelayUs;
+use hal::delay::DelayNs;
 
 /// Errors in this crate
 #[derive(Debug)]
 pub enum Error<CommE, PinE> {
     Comm(CommE),
     Pin(PinE),
-
-    GenericError,
 }
 
 pub struct CST816S<I2C, PINT, RST> {
@@ -39,11 +37,9 @@ pub struct TouchEvent {
 
 impl<I2C, PINT, RST, CommE, PinE> CST816S<I2C, PINT, RST>
 where
-    I2C: hal::blocking::i2c::Write<Error = CommE>
-        + hal::blocking::i2c::Read<Error = CommE>
-        + hal::blocking::i2c::WriteRead<Error = CommE>,
-    PINT: hal::digital::v2::InputPin,
-    RST: hal::digital::v2::StatefulOutputPin<Error = PinE>,
+    I2C: hal::i2c::I2c<Error=CommE>,
+    PINT: hal::digital::InputPin,
+    RST: hal::digital::StatefulOutputPin<Error = PinE>,
 {
     pub fn new(port: I2C, interrupt_pin: PINT, reset_pin: RST) -> Self {
         Self {
@@ -54,10 +50,10 @@ where
         }
     }
 
-    /// setup the driver to communicate with the device
+    /// Set up the driver to communicate with the device
     pub fn setup(
         &mut self,
-        delay_source: &mut impl DelayUs<u32>,
+        delay_source: &mut impl DelayNs,
     ) -> Result<(), Error<CommE, PinE>> {
         // reset the chip
         self.pin_rst.set_low().map_err(Error::Pin)?;
@@ -116,11 +112,11 @@ where
         touch.y = (buf[Self::TOUCH_Y_L_OFF] as i32) | (((touch_y_h_and_finger & 0x0F) as i32) << 8);
 
         // action of touch (0 = down, 1 = up, 2 = contact)
-        touch.action = (touch_x_h_and_action >> 6) as u8;
-        touch.finger_id = (touch_y_h_and_finger >> 4) as u8;
+        touch.action = touch_x_h_and_action >> 6;
+        touch.finger_id = touch_y_h_and_finger >> 4;
 
         //  Compute touch pressure and area
-        touch.pressure = buf[Self::TOUCH_PRESURE_OFF];
+        touch.pressure = buf[Self::TOUCH_PRESSURE_OFF];
         touch.area = buf[Self::TOUCH_AREA_OFF] >> 4;
 
         Some(touch)
@@ -143,7 +139,7 @@ where
                 let gesture_id = self.blob_buf[Self::GESTURE_ID_OFF];
                 let num_points = (self.blob_buf[Self::NUM_POINTS_OFF] & 0x0F) as usize;
                 if num_points <= Self::MAX_TOUCH_CHANNELS {
-                    //In testing with a PineTime we only ever seem to get one event
+                    // In testing with a PineTime we only ever seem to get one event
                     let evt_start: usize = Self::GESTURE_HEADER_LEN;
                     if let Some(mut evt) = Self::touch_event_from_data(
                         self.blob_buf[evt_start..evt_start + Self::RAW_TOUCH_EVENT_LEN].as_ref(),
@@ -183,12 +179,15 @@ where
     const TOUCH_Y_H_AND_FINGER_OFF: usize = 2;
     /// offset of touch Y position low bits
     const TOUCH_Y_L_OFF: usize = 3;
-    const TOUCH_PRESURE_OFF: usize = 4;
+    const TOUCH_PRESSURE_OFF: usize = 4;
     const TOUCH_AREA_OFF: usize = 5;
 }
 
-const BLOB_BUF_LEN: usize = (10 * 6) + 3; // (MAX_TOUCH_CHANNELS * RAW_TOUCH_EVENT_LEN) + GESTURE_HEADER_LEN;
-const ONE_EVENT_LEN: usize = 6 + 3; // RAW_TOUCH_EVENT_LEN + GESTURE_HEADER_LEN
+const GESTURE_HEADER_LEN: usize = 3;
+const MAX_TOUCH_CHANNELS: usize = 10;
+const RAW_TOUCH_EVENT_LEN: usize = 6;
+const BLOB_BUF_LEN: usize = (MAX_TOUCH_CHANNELS * RAW_TOUCH_EVENT_LEN) + GESTURE_HEADER_LEN;
+const ONE_EVENT_LEN: usize = RAW_TOUCH_EVENT_LEN + GESTURE_HEADER_LEN;
 
 #[derive(Debug, PartialEq)]
 #[repr(u8)]
@@ -203,7 +202,7 @@ pub enum TouchGesture {
     LongPress = 0x0C,
 }
 
-impl core::convert::From<u8> for TouchGesture {
+impl From<u8> for TouchGesture {
     fn from(val: u8) -> Self {
         match val {
             0x01 => Self::SlideDown,
@@ -215,13 +214,5 @@ impl core::convert::From<u8> for TouchGesture {
             0x0C => Self::LongPress,
             _ => Self::None,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
     }
 }
